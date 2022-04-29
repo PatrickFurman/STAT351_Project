@@ -1,4 +1,4 @@
-# STAT351_Project
+# STAT351 Project
 Heart disease classification using tree-based methods
 
 ## EDA
