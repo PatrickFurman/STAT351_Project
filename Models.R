@@ -139,29 +139,56 @@ for (i in 1:length(datasets)) {
 comparison = comparison[-c(1),]
 
 # Grid search for hyperparameter tuning
-depths = 6:10
-lrs = c(0.03, 0.003, 0.001, 0.0001)
-iters = 500
-results = data.frame(depth=rep(depths, length(lrs)), 
-                     lr=unlist(lapply(lrs, function(x){return(rep(x, length(depths)))})), 
-                     f1_mean=rep(0, length(depths)*length(lrs)),
-                     f1_sd=rep(0, length(depths)*length(lrs)),
-                     n_trees=rep(0, length(depths)*length(lrs)))
-for (lr in lrs) {
+depths = c(2, 6, 8)
+ntrees = c(150, 500)
+
+results = data.frame(depth=rep(depths, length(ntrees)), 
+                        ntrees=unlist(lapply(ntrees, function(x){return(rep(x, length(depths)))})),
+                        train_accuracy=rep(NA, length(depths)*length(ntrees)),
+                        train_f1=rep(NA, length(depths)*length(ntrees)),
+                        train_precision=rep(NA, length(depths)*length(ntrees)),
+                        train_recall=rep(NA, length(depths)*length(ntrees)),
+                        test_accuracy=rep(NA, length(depths)*length(ntrees)),
+                        test_f1=rep(NA, length(depths)*length(ntrees)),
+                        test_precision=rep(NA, length(depths)*length(ntrees)),
+                        test_recall=rep(NA, length(depths)*length(ntrees)))
+for (n in ntrees) {
   for (depth in depths) {
-    cv_res = catboost.cv(full_pool, fold_count=4, params=list(loss_function='CrossEntropy',
-                                                                eval_metric='F1',
-                                                                depth=depth,
-                                                                learning_rate=lr,
-                                                                iterations=iters,
-                                                                use_best_model=TRUE,
-                                                                metric_period=5))
-    best_iter = which(cv_res$test.F1.mean == max(cv_res$test.F1.mean))[1]
-    results[results$depth == depth & results$lr == lr,'n_trees'] = best_iter
-    results[results$depth == depth & results$lr == lr,'f1_mean'] = cv_res$test.F1.mean[best_iter]
-    results[results$depth == depth & results$lr == lr,'f1_sd'] = cv_res$test.F1.std[best_iter]
+    rf = randomForest(HeartDisease~., data=train5, ntree=n, maxnodes=depth)
+    row = evaluate(rf, train5, test5, 'rf_tune')
+    results[results$depth == depth & results$ntrees == n,-c(1,2)] = row[,-c(1,2)]
   }
 }
+
 results
-# write.csv(results, 'results.csv', row.names=F)
+best_n = NA
+best_depth = NA
+#write.csv(results, 'tuning_results.csv', row.names=F)
+
+# 5 fold cross validation for evaluating final model
+k = 5
+cutoffs = round(seq(1, nrow(df5), nrow(df5)/k))
+accs = rep(NA, k)
+f1s = rep(NA, k)
+for (i in 1:(length(cutoffs)-1)) {
+  start = cutoffs[i]
+  end = cutoffs[i+1]
+  indices = start:end
+  test_cv = df5[indices,]
+  train_cv = df5[-indices,]
+  rf_cv = randomForest(HeartDisease~., data=train_cv)
+  cv_preds = predict(rf_cv, test_cv, type='Class')
+  accs[i] = accuracy(test_cv$HeartDisease, cv_preds)
+  f1s[i] = fbeta_score(unfactor(test_cv$HeartDisease), unfactor(cv_preds))
+}
+indices = cutoffs[5]:nrow(df5)
+test_cv = df5[indices,]
+train_cv = df5[-indices,]
+rf_cv = randomForest(HeartDisease~., data=train_cv)
+cv_preds = predict(rf_cv, test_cv, type='Class')
+accs[5] = accuracy(test_cv$HeartDisease, cv_preds)
+f1s[5] = fbeta_score(unfactor(test_cv$HeartDisease), unfactor(cv_preds))
+
+cat('Final model test F1 score from 5 fold cross validation:', mean(f1s, na.rm=T))
+cat('Final model test accuracy from 5 fold cross validation:', mean(accs, na.rm=T))
 
